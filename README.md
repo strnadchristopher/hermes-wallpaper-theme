@@ -9,6 +9,14 @@ A Hermes Desktop theme that follows your wallpaper. Change the wallpaper, and He
 
 Desktop-only: no agent tools, hooks or environment variables.
 
+| Pywal palette (default) | Flat palette file |
+|---|---|
+| ![Hermes Desktop themed from a Pywal palette](docs/screenshots/pywal-dark.png) | ![Hermes Desktop themed from a light flat palette](docs/screenshots/flat-palette-light.png) |
+| **Settings page** | **Glass at 60%** |
+| ![Wallpaper Theme settings page](docs/screenshots/settings.png) | ![Glass background over a blurred wallpaper](docs/screenshots/glass.png) |
+
+Screenshots come from a throwaway Desktop instance with sample palettes and a canned model reply. In the glass shot, the Desktop window was captured with its transparency and composited over a sample wallpaper with a 24 px Gaussian blur, standing in for compositor blur.
+
 ## Install
 
 In Hermes Desktop: **Capabilities → Plugins → Install from Git**, paste

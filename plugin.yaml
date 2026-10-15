@@ -1,6 +1,7 @@
 name: wallpaper-theme
 label: Wallpaper Theme
 version: 1.0.0
+requires_hermes: ">=0.22.1"
 author: strnadchristopher
 homepage: https://github.com/strnadchristopher/hermes-wallpaper-theme
 description: >
