@@ -1,0 +1,13 @@
+name: wallpaper-theme
+label: Wallpaper Theme
+version: 1.0.0
+author: strnadchristopher
+homepage: https://github.com/strnadchristopher/hermes-wallpaper-theme
+description: >
+  A Hermes Desktop theme that follows your wallpaper. Reads Pywal's
+  ~/.cache/wal/colors.json by default (or any palette file you point it at),
+  derives a readable palette with checked contrast, and repaints live when the
+  file changes. Optional glass mode paints a translucent background for
+  compositor blur or native window materials.
+  Desktop-only (desktop/plugin.js); no agent tools, hooks or env vars.
+tags: [desktop, theme, appearance, pywal, wallpaper]
