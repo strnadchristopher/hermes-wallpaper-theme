@@ -11,11 +11,17 @@ Desktop-only: no agent tools, hooks or environment variables.
 
 ## Install
 
-```bash
-hermes plugins install strnadchristopher/hermes-wallpaper-theme --enable
+In Hermes Desktop: **Capabilities → Plugins → Install from Git**, paste
+
+```
+https://github.com/strnadchristopher/hermes-wallpaper-theme
 ```
 
-Desktop picks it up within a few seconds. Choose **Wallpaper** in the theme picker, or run **Theme: use Wallpaper** from the command palette.
+and install. Desktop loads it within a few seconds. Choose **Wallpaper** in the theme picker, or run **Theme: use Wallpaper** from the command palette.
+
+This is a desktop-only plugin with no agent half, so installing it this way keeps it out of your agent profiles. (`hermes plugins install` also works, but it files the plugin under one profile, and Desktop then offers **Install here** for every other profile. You can ignore that.)
+
+To install by hand, copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/hermes-wallpaper-theme/plugin.js`.
 
 ## Choosing the palette file
 
