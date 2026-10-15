@@ -6,7 +6,7 @@ import plugin, {
   contrast,
   derivePalette,
   ensureContrast,
-  loadPrefs,
+  normalizePrefs,
   glassCSS,
   normalizeHex,
   PYWAL_PATH,
@@ -120,8 +120,8 @@ function fakeHost(files) {
       }
     }
   }
-  globalThis.localStorage = { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) }
   const ctx = {
+    storage: { get: (k, d) => (storage.has(k) ? storage.get(k) : d), set: (k, v) => storage.set(k, v), remove: k => storage.delete(k) },
     register(c) {
       contributions.set(c.id, c)
       return () => contributions.delete(c.id)
@@ -173,12 +173,19 @@ test('register(): the config file path overrides Pywal', async () => {
   assert.equal(host.contributions.get('theme').data.colors.background, '#151817')
 })
 
-test('prefs: defaults, round-trip and junk tolerance', () => {
-  const mem = new Map()
-  const store = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) }
-  assert.deepEqual(loadPrefs(store), { path: '', glass: false, opacity: 82 })
-  mem.set('hermes-wallpaper-theme:prefs', JSON.stringify({ path: '~/x.json', glass: true, opacity: 500 }))
-  assert.deepEqual(loadPrefs(store), { path: '~/x.json', glass: true, opacity: 82 })
-  mem.set('hermes-wallpaper-theme:prefs', '{nope')
-  assert.deepEqual(loadPrefs(store), { path: '', glass: false, opacity: 82 })
+test('prefs: defaults, valid values and junk tolerance', () => {
+  assert.deepEqual(normalizePrefs(null), { path: '', glass: false, opacity: 82 })
+  assert.deepEqual(normalizePrefs({ path: '~/x.json', glass: true, opacity: 60 }), { path: '~/x.json', glass: true, opacity: 60 })
+  assert.deepEqual(normalizePrefs({ path: 5, glass: 'yes', opacity: 500 }), { path: '', glass: false, opacity: 82 })
+})
+
+test('register(): settings path is restored from plugin storage', async () => {
+  const files = { [PYWAL_PATH]: JSON.stringify(pywal), '~/mine.json': JSON.stringify(walglass) }
+  const host = fakeHost(files)
+  host.storage.set('prefs', { path: '~/mine.json', glass: true, opacity: 70 })
+  plugin.register(host.ctx)
+  await settle()
+  const theme = host.contributions.get('theme').data
+  assert.equal(theme.colors.background, '#151817')
+  assert.match(theme.customCSS, /70%, transparent/)
 })

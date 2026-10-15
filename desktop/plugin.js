@@ -334,36 +334,20 @@ async function readConfig() {
   }
 }
 
-const PREFS_KEY = 'hermes-wallpaper-theme:prefs'
-
-/** Per-install settings in the renderer's localStorage (the plugin SDK has no storage API). */
-export function loadPrefs(store = globalThis.localStorage) {
+/** Validate stored settings; anything malformed falls back to defaults. */
+export function normalizePrefs(raw) {
   const defaults = { path: '', glass: false, opacity: DEFAULT_GLASS_OPACITY }
 
-  try {
-    const raw = JSON.parse(store?.getItem(PREFS_KEY) ?? 'null')
-
-    if (!raw || typeof raw !== 'object') {
-      return defaults
-    }
-
-    const opacity = Number(raw.opacity)
-
-    return {
-      path: typeof raw.path === 'string' ? raw.path : '',
-      glass: raw.glass === true,
-      opacity: Number.isFinite(opacity) && opacity >= 30 && opacity <= 100 ? opacity : DEFAULT_GLASS_OPACITY
-    }
-  } catch {
+  if (!raw || typeof raw !== 'object') {
     return defaults
   }
-}
 
-function savePrefs(prefs, store = globalThis.localStorage) {
-  try {
-    store?.setItem(PREFS_KEY, JSON.stringify(prefs))
-  } catch {
-    // Storage full or unavailable: the setting still applies for this session.
+  const opacity = Number(raw.opacity)
+
+  return {
+    path: typeof raw.path === 'string' ? raw.path : '',
+    glass: raw.glass === true,
+    opacity: Number.isFinite(opacity) && opacity >= 30 && opacity <= 100 ? opacity : DEFAULT_GLASS_OPACITY
   }
 }
 
@@ -449,7 +433,8 @@ const plugin = {
   name: 'Wallpaper Theme',
   description: 'A theme that follows your wallpaper palette (Pywal or any palette file), with optional glass.',
   register(ctx) {
-    $prefs.set(loadPrefs())
+    // ctx.storage is per-plugin and per Desktop install.
+    $prefs.set(normalizePrefs(ctx.storage.get('prefs', null)))
 
     let lastKey = ''
     let disposeTheme = null
@@ -511,7 +496,7 @@ const plugin = {
       const next = { ...$prefs.get(), ...patch }
       next.path = (next.path || '').trim()
       $prefs.set(next)
-      savePrefs(next)
+      ctx.storage.set('prefs', next)
       void tick(true)
     }
 
