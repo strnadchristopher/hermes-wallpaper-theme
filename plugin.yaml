@@ -1,6 +1,6 @@
 name: wallpaper-theme
 label: Wallpaper Theme
-version: 1.0.0
+version: 1.1.0
 requires_hermes: ">=0.22.1"
 author: strnadchristopher
 homepage: https://github.com/strnadchristopher/hermes-wallpaper-theme
@@ -10,5 +10,7 @@ description: >
   derives a readable palette with checked contrast, and repaints live when the
   file changes. Optional glass mode paints a translucent background for
   compositor blur or native window materials.
-  Desktop-only (desktop/plugin.js); no agent tools, hooks or env vars.
+  The theme is desktop/plugin.js; dashboard/plugin_api.py is its only backend,
+  a single GET /palette route that reads the palette file (inside your home
+  directory, JSON only, colour fields only). No tools, hooks or env vars.
 tags: [desktop, theme, appearance, pywal, wallpaper]

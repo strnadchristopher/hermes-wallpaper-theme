@@ -1,13 +1,13 @@
 # Wallpaper Theme for Hermes Desktop
 
-A Hermes Desktop theme that follows your wallpaper. Change the wallpaper, and Hermes repaints within a couple of seconds.
+A Hermes Desktop theme that follows your wallpaper. Change the wallpaper, and Hermes repaints within a few seconds.
 
 - **Works with Pywal out of the box.** It reads `~/.cache/wal/colors.json`, so there's nothing to configure.
 - **Or any palette file.** Point it at a flat JSON file written by matugen, wallust, your own script, or anything else.
 - **Always readable.** Wallpaper colours are adjusted until body text reaches 7:1 contrast, accents 3:1 and text on accents 4.5:1. A half-written file never repaints the app; the last good palette stays.
 - **Optional glass.** The app background becomes translucent so a blurred desktop shows through.
 
-Desktop-only: no agent tools, hooks or environment variables.
+One package, two halves: the theme is `desktop/plugin.js`, built on `@hermes/plugin-sdk` only. The palette file is read by the package's own backend route (`dashboard/plugin_api.py`, `GET /api/plugins/wallpaper-theme/palette`), which the theme reaches with `ctx.rest`. No agent tools, hooks or environment variables; no network.
 
 | Pywal palette (default) | Flat palette file |
 |---|---|
@@ -19,17 +19,16 @@ Screenshots come from a throwaway Desktop instance with sample palettes and a ca
 
 ## Install
 
-In Hermes Desktop: **Capabilities → Plugins → Install from Git**, paste
+From the Hermes plugin catalog (**Capabilities → Plugins** in Desktop, or `hermes plugins install wallpaper-theme`), or straight from this repository:
 
+```bash
+hermes plugins install https://github.com/strnadchristopher/hermes-wallpaper-theme
+hermes plugins enable wallpaper-theme
 ```
-https://github.com/strnadchristopher/hermes-wallpaper-theme
-```
 
-and install. Desktop loads it within a few seconds. Choose **Wallpaper** in the theme picker, or run **Theme: use Wallpaper** from the command palette.
+Then restart Hermes (`hermes serve`, or quit and reopen Desktop) so the backend route mounts, and turn the plugin on in **Capabilities → Plugins** if it isn't already. Choose **Wallpaper** in the theme picker, or run **Theme: use Wallpaper** from the command palette.
 
-This is a desktop-only plugin with no agent half, so installing it this way keeps it out of your agent profiles. (`hermes plugins install` also works, but it files the plugin under one profile, and Desktop then offers **Install here** for every other profile. You can ignore that.)
-
-To install by hand, copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/hermes-wallpaper-theme/plugin.js`.
+Both halves are needed. The desktop half alone shows *backend not enabled* on its settings page until `wallpaper-theme` is in `plugins.enabled` and Hermes has restarted. Python plugins are opt-in by design; enabling this one imports only `dashboard/plugin_api.py`, which has no dependencies beyond FastAPI.
 
 ## Choosing the palette file
 
@@ -44,7 +43,7 @@ The plugin uses the first of these that is set:
 
 3. **Pywal:** `~/.cache/wal/colors.json`.
 
-Paths are read on the machine running Desktop, and `~` is expanded.
+`~` is expanded. The file must be inside your home directory (or an `XDG_*_HOME` directory), be valid JSON and be under 256 KiB; only the colour fields are sent to Desktop, never the raw file. Paths resolve on the machine running the Hermes backend — the same machine for a local install. Against a remote backend the theme follows that machine's palette file.
 
 ## Palette formats
 
@@ -89,9 +88,10 @@ If you already generate `~/.local/share/wal-glass/palette.json`, point the plugi
 ## Development
 
 ```bash
-npm test   # node --test; stubs the SDK, no Hermes checkout needed
+npm test   # node --test for the theme (SDK stubbed) + unittest for the backend route (needs fastapi)
+hermes plugins validate .
 ```
 
-`desktop/plugin.js` is plain ESM that imports only `@hermes/plugin-sdk` and `react`. Desktop loads it as-is, with no build step.
+`desktop/plugin.js` is plain ESM that imports only `@hermes/plugin-sdk` and `react`; Desktop loads it as-is, with no build step. `dashboard/plugin_api.py` is a FastAPI router with one route, polled every 3 s with the last file stamp so an unchanged palette costs a `stat` and nothing on the wire. To work on it live, link the checkout into `~/.hermes/plugins/wallpaper-theme` instead of installing it.
 
 MIT licensed.

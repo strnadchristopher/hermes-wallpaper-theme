@@ -6,12 +6,13 @@ import plugin, {
   contrast,
   derivePalette,
   ensureContrast,
+  BACKEND_OFF_MESSAGE,
+  describeRestError,
   normalizePrefs,
   glassCSS,
   normalizeHex,
   PYWAL_PATH,
   readSource,
-  resolveSourcePath,
   THEME_NAME
 } from '../desktop/plugin.js'
 import { requested } from './sdk-stub.mjs'
@@ -101,27 +102,76 @@ test('theme has the name, required colors and glass CSS only when asked', () => 
   assert.match(glassCSS(5), /30%/, 'opacity is clamped')
 })
 
-test('source path priority: settings > config file > Pywal', () => {
-  assert.deepEqual(resolveSourcePath('  ~/p.json ', { source: '~/c.json' }), { path: '~/p.json', origin: 'settings' })
-  assert.deepEqual(resolveSourcePath('', { source: '~/c.json' }), { path: '~/c.json', origin: 'config' })
-  assert.deepEqual(resolveSourcePath('', null), { path: PYWAL_PATH, origin: 'default' })
-  assert.deepEqual(resolveSourcePath(undefined, { source: '' }), { path: PYWAL_PATH, origin: 'default' })
+test('describeRestError: a 404 from ctx.rest means the backend is not enabled', () => {
+  assert.equal(describeRestError(Object.assign(new Error('404: not found'), { statusCode: 404 })), BACKEND_OFF_MESSAGE)
+  assert.equal(describeRestError(new Error('404: {"detail":"Not Found"}')), BACKEND_OFF_MESSAGE)
+  assert.equal(describeRestError(new Error('socket hang up')), 'socket hang up')
 })
 
+const CONFIG_PATH = '~/.config/hermes-wallpaper-theme/config.json'
+
+/**
+ * Stand-in for dashboard/plugin_api.py: same resolution order, same reply
+ * shape, same `since` short-circuit. `files` maps a path to its text; a
+ * "version" per path plays the role of mtime. Set `host.down` to make
+ * ctx.rest throw like an unmounted backend.
+ */
 function fakeHost(files) {
   const contributions = new Map()
   const storage = new Map()
   const intervals = []
-  globalThis.window = {
-    hermesDesktop: {
-      readFileText: async path => {
-        if (!(path in files)) throw new Error('ENOENT')
-        return { text: files[path] }
+  const versions = new Map()
+  const calls = []
+  const host = { down: false }
+
+  const stampOf = path => `${path}:${versions.get(path) ?? 0}:${files[path].length}`
+
+  const palette = params => {
+    const settings = (params.get('path') || '').trim()
+    let config = null
+
+    if (!settings && CONFIG_PATH in files) {
+      try {
+        config = JSON.parse(files[CONFIG_PATH])
+      } catch {
+        config = null
       }
     }
+
+    const fromConfig = typeof config?.source === 'string' ? config.source.trim() : ''
+    const [path, origin] = settings ? [settings, 'settings'] : fromConfig ? [fromConfig, 'config'] : [PYWAL_PATH, 'default']
+
+    if (!(path in files)) {
+      return { ok: false, path, origin, error: 'no such file' }
+    }
+
+    const stamp = stampOf(path)
+
+    if (params.get('since') === stamp) {
+      return { ok: true, unchanged: true, stamp, path, origin }
+    }
+
+    try {
+      return { ok: true, stamp, path, origin, palette: JSON.parse(files[path]) }
+    } catch {
+      return { ok: false, path, origin, error: 'not valid JSON' }
+    }
   }
+
   const ctx = {
     storage: { get: (k, d) => (storage.has(k) ? storage.get(k) : d), set: (k, v) => storage.set(k, v), remove: k => storage.delete(k) },
+    async rest(route) {
+      calls.push(route)
+
+      if (host.down) {
+        throw Object.assign(new Error('404: {"detail":"Not Found"}'), { statusCode: 404 })
+      }
+
+      const [pathname, search = ''] = route.split('?')
+      assert.equal(pathname, '/palette')
+
+      return palette(new URLSearchParams(search))
+    },
     register(c) {
       contributions.set(c.id, c)
       return () => contributions.delete(c.id)
@@ -133,7 +183,13 @@ function fakeHost(files) {
       return () => {}
     }
   }
-  return { ctx, contributions, intervals, storage }
+
+  const write = (path, text) => {
+    files[path] = text
+    versions.set(path, (versions.get(path) ?? 0) + 1)
+  }
+
+  return Object.assign(host, { ctx, contributions, intervals, storage, calls, write })
 }
 
 const settle = () => new Promise(r => setTimeout(r, 20))
@@ -146,13 +202,19 @@ test('register(): loads Pywal by default, repaints on change, keeps last good th
   const first = host.contributions.get('theme').data
   assert.equal(first.name, THEME_NAME)
 
-  files[PYWAL_PATH] = JSON.stringify({ ...pywal, special: { ...pywal.special, background: '#1d1020' } })
+  // An unchanged file is answered from the stamp: no palette on the wire, no repaint.
+  await host.intervals[0]()
+  await settle()
+  assert.match(host.calls.at(-1), /since=/)
+  assert.equal(host.contributions.get('theme').data, first)
+
+  host.write(PYWAL_PATH, JSON.stringify({ ...pywal, special: { ...pywal.special, background: '#1d1020' } }))
   await host.intervals[0]()
   await settle()
   const second = host.contributions.get('theme').data
   assert.equal(second.colors.background, '#1d1020')
 
-  files[PYWAL_PATH] = '{"special": {'
+  host.write(PYWAL_PATH, '{"special": {')
   await host.intervals[0]()
   await settle()
   assert.equal(host.contributions.get('theme').data.colors.background, '#1d1020')
@@ -188,4 +250,22 @@ test('register(): settings path is restored from plugin storage', async () => {
   const theme = host.contributions.get('theme').data
   assert.equal(theme.colors.background, '#151817')
   assert.match(theme.customCSS, /70%, transparent/)
+})
+
+test('register(): an unmounted backend reports how to enable it and recovers once it answers', async () => {
+  const host = fakeHost({ [PYWAL_PATH]: JSON.stringify(pywal) })
+  host.down = true
+  plugin.register(host.ctx)
+  await settle()
+  assert.equal(host.contributions.has('theme'), false)
+
+  host.down = false
+  await host.intervals[0]()
+  await settle()
+  assert.equal(host.contributions.get('theme').data.colors.background, '#0f1417')
+})
+
+test('register(): the plugin never touches the Desktop bridge', async () => {
+  const source = await import('node:fs/promises').then(fs => fs.readFile(new URL('../desktop/plugin.js', import.meta.url), 'utf8'))
+  assert.doesNotMatch(source, /hermesDesktop|readFileText|window\./)
 })

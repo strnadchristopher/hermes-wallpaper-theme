@@ -1,0 +1,14 @@
+{
+  "name": "wallpaper-theme",
+  "label": "Wallpaper Theme",
+  "description": "Palette-file reader for the Wallpaper Theme desktop plugin. No dashboard tab; the UI lives in desktop/plugin.js.",
+  "icon": "Palette",
+  "version": "1.1.0",
+  "tab": {
+    "path": "/wallpaper-theme",
+    "hidden": true
+  },
+  "slots": [],
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

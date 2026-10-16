@@ -1,12 +1,15 @@
 /**
  * Wallpaper Theme — a Hermes Desktop theme that follows your wallpaper.
  *
- * Reads a palette file on the machine running Desktop (Pywal's
- * ~/.cache/wal/colors.json by default), derives a readable theme from it and
- * repaints live whenever the file changes. Optional glass mode makes the app
- * background translucent so a compositor blur or native material shows through.
+ * Reads a palette file (Pywal's ~/.cache/wal/colors.json by default), derives a
+ * readable theme from it and repaints live whenever the file changes. Optional
+ * glass mode makes the app background translucent so a compositor blur or
+ * native material shows through.
  *
- * Palette source, highest priority first:
+ * The file is read by this package's own backend (dashboard/plugin_api.py,
+ * reached with ctx.rest('/palette')), so the plugin stays inside the plugin SDK.
+ * It resolves on the machine running the Hermes backend, which is the machine
+ * running Desktop for a local install. Palette source, highest priority first:
  *   1. the path typed into Settings → Plugins → Wallpaper Theme
  *   2. "source" in ~/.config/hermes-wallpaper-theme/config.json (dotfile-friendly)
  *   3. ~/.cache/wal/colors.json (Pywal)
@@ -35,9 +38,8 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 export const PLUGIN_ID = 'wallpaper-theme'
 export const THEME_NAME = 'wallpaper'
 export const PYWAL_PATH = '~/.cache/wal/colors.json'
-export const CONFIG_PATH = '~/.config/hermes-wallpaper-theme/config.json'
 export const DEFAULT_GLASS_OPACITY = 82
-const POLL_MS = 2000
+const POLL_MS = 3000
 
 // ---------------------------------------------------------------------------
 // Color math (pure; no SDK so it is unit-testable in plain Node)
@@ -293,45 +295,44 @@ export function buildTheme(palette, { glass = false, opacity = DEFAULT_GLASS_OPA
   }
 }
 
-/** Settings path > config-file path > Pywal. Blank strings fall through. */
-export function resolveSourcePath(settingsPath, config) {
-  const fromSettings = typeof settingsPath === 'string' ? settingsPath.trim() : ''
-
-  if (fromSettings) {
-    return { path: fromSettings, origin: 'settings' }
-  }
-
-  const fromConfig = config && typeof config.source === 'string' ? config.source.trim() : ''
-
-  return fromConfig ? { path: fromConfig, origin: 'config' } : { path: PYWAL_PATH, origin: 'default' }
-}
-
 // ---------------------------------------------------------------------------
 // Desktop wiring
 // ---------------------------------------------------------------------------
 
-async function readLocalText(path) {
-  const bridge = typeof window !== 'undefined' ? window.hermesDesktop : undefined
+/**
+ * GET /api/plugins/wallpaper-theme/palette via the SDK's own REST door.
+ * `path` is the Settings override (blank lets the backend fall through to the
+ * config file, then Pywal); `since` is the last reply's stamp so an unchanged
+ * file costs one stat and no colours on the wire.
+ */
+async function fetchPalette(ctx, path, since) {
+  const query = new URLSearchParams()
 
-  if (!bridge?.readFileText) {
-    throw new Error('This Hermes Desktop build cannot read local files from plugins.')
+  if (path) {
+    query.set('path', path)
   }
 
-  const result = await bridge.readFileText(path)
-
-  if (!result || typeof result.text !== 'string') {
-    throw new Error('No readable text at that path.')
+  if (since) {
+    query.set('since', since)
   }
 
-  return result.text
+  const search = query.toString()
+
+  return ctx.rest(`/palette${search ? `?${search}` : ''}`)
 }
 
-async function readConfig() {
-  try {
-    return JSON.parse(await readLocalText(CONFIG_PATH))
-  } catch {
-    return null
+export const BACKEND_OFF_MESSAGE =
+  'backend not enabled. Run `hermes plugins enable wallpaper-theme`, restart Hermes, then Reload.'
+
+/** A thrown ctx.rest error into one line for the settings page. */
+export function describeRestError(error) {
+  const message = error?.message || String(error)
+
+  if (error?.statusCode === 404 || /^404\b/.test(message)) {
+    return BACKEND_OFF_MESSAGE
   }
+
+  return message
 }
 
 /** Validate stored settings; anything malformed falls back to defaults. */
@@ -374,7 +375,7 @@ function SettingsPage({ save, refresh }) {
           children: [
             'Leave blank to use ',
             jsx('code', { children: status.origin === 'config' ? 'the config file' : 'Pywal' }),
-            '. Pywal is ~/.cache/wal/colors.json; a flat JSON with background, foreground and accent also works.'
+            '. Pywal is ~/.cache/wal/colors.json; a flat JSON with background, foreground and accent also works. Read by the Hermes backend, inside your home directory.'
           ]
         }),
         hint: stateLine,
@@ -437,8 +438,14 @@ const plugin = {
     $prefs.set(normalizePrefs(ctx.storage.get('prefs', null)))
 
     let lastKey = ''
+    let last = { stamp: '', source: null }
     let disposeTheme = null
     let busy = false
+
+    const fail = (path, origin, message) => {
+      last = { stamp: '', source: null }
+      $status.set({ state: 'error', path, origin, format: '', message })
+    }
 
     const tick = async (force = false) => {
       if (busy) {
@@ -449,35 +456,38 @@ const plugin = {
 
       try {
         const prefs = $prefs.get()
-        const { path, origin } = resolveSourcePath(prefs.path, prefs.path ? null : await readConfig())
-        let text
+        let reply
 
         try {
-          text = await readLocalText(path)
+          reply = await fetchPalette(ctx, prefs.path, last.stamp)
         } catch (error) {
-          $status.set({ state: 'error', path, origin, format: '', message: error?.message || String(error) })
+          fail(prefs.path || PYWAL_PATH, prefs.path ? 'settings' : 'default', describeRestError(error))
 
           return
         }
 
-        const key = `${path}\n${prefs.glass}\n${prefs.opacity}\n${text}`
+        const path = typeof reply?.path === 'string' ? reply.path : prefs.path || PYWAL_PATH
+        const origin = typeof reply?.origin === 'string' ? reply.origin : 'default'
 
-        if (!force && key === lastKey) {
+        if (!reply?.ok) {
+          // Keep the last good theme; a writer may be mid-save.
+          fail(path, origin, reply?.error || 'palette request failed')
+
           return
         }
 
-        let source = null
-
-        try {
-          source = readSource(JSON.parse(text))
-        } catch {
-          source = null
-        }
+        const source = reply.unchanged ? last.source : readSource(reply.palette)
 
         if (!source) {
-          // Keep the last good theme; a writer may be mid-save.
-          $status.set({ state: 'error', path, origin, format: '', message: 'not a Pywal or flat palette JSON' })
+          fail(path, origin, 'not a Pywal or flat palette JSON')
 
+          return
+        }
+
+        last = { stamp: reply.stamp, source }
+        const key = `${path}\n${reply.stamp}\n${prefs.glass}\n${prefs.opacity}`
+
+        if (!force && key === lastKey) {
           return
         }
 
@@ -495,6 +505,12 @@ const plugin = {
     const save = patch => {
       const next = { ...$prefs.get(), ...patch }
       next.path = (next.path || '').trim()
+
+      if (next.path !== $prefs.get().path) {
+        // A different file: never answer the new path's stamp with the old palette.
+        last = { stamp: '', source: null }
+      }
+
       $prefs.set(next)
       ctx.storage.set('prefs', next)
       void tick(true)

@@ -1,11 +1,11 @@
 {
   "name": "hermes-wallpaper-theme",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Hermes Desktop theme that follows your wallpaper palette (Pywal or any palette file), with optional glass.",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "node --import ./tests/register.mjs --test tests/"
+    "test": "node --import ./tests/register.mjs --test tests/ && python3 -m unittest discover -s tests"
   }
 }
